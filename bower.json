@@ -1,0 +1,7 @@
+{
+  "name": "purescript-concurrency",
+  "version": "0.0.0",
+  "description": "PureScript concurrency primitives.",
+  "license": "MIT"
+}
+

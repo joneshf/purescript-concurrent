@@ -1,0 +1,14 @@
+{
+  "name": "purescript-concurrency",
+  "version": "0.0.0",
+  "description": "PureScript concurrency primitives.",
+  "license": "MIT",
+  "devDependencies": {
+    "gulp": "^3.8.10",
+    "gulp-concat": "^2.4.3",
+    "gulp-filter": "^2.0.0",
+    "gulp-if": "^1.2.5",
+    "gulp-purescript": "^0.1.2",
+    "gulp-run": "^1.6.5"
+  }
+}
