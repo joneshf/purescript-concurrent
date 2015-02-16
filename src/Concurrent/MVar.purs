@@ -1,77 +1,77 @@
 module Concurrent.MVar where
 
   import Control.Monad.Eff (Eff())
+  import Control.Monad.Eff.Ref
 
-  import Debug.Trace (Trace(), print)
+  import Data.Function
 
-  foreign import data M :: !
+  foreign import data MVarEff :: !
+
   foreign import data MVar :: * -> *
 
-  foreign import newMVar
-    """
-      function newMVar(x) {
-        return function() {
-          return new mVarImpl(x, true);
-        }
-      }
-    """ :: forall a eff. a -> Eff (mVar :: M | eff) (MVar a)
+  foreign import undefined :: forall a. a
 
-  foreign import newEmptyMVar
-    """
-      function newEmptyMVar() {
-        return new mVarImpl(null, false);
-      }
-    """ :: forall a eff. Eff (mVar :: M | eff) (MVar a)
+  -- data MAction m a = Put a m
+  --                  | Take m a
 
-  foreign import putMVar
-    """
-      function putMVar(mVar) {
-        return function(x) {
-          return function() {
-            var ready = false;
-            mVar.enqueuePut(function() {
-              ready = true;
-            }, x);
-            while (!ready) {}
-            return {};
-          }
-        }
-      }
-    """ :: forall a eff. MVar a -> a -> Eff (mVar :: M | eff) Unit
+  foreign import newEmptyMVarImpl """
+    function newEmptyMVarImpl() {
+      return {filled: false, val: null}
+    }
+  """ :: forall a eff. Eff (mvar :: MVarEff | eff) (MVar a)
 
-  foreign import readMVar
-    """
-      function readMVar(mVar) {
-        return function() {
-          var ready = false;
-          mVar.enqueueRead(function() {
-            ready = true;
-          })
-          while (!ready) {}
-          return mVar.value;
-        }
-      }
-    """ :: forall a eff. MVar a -> Eff (mVar :: M | eff) a
+  foreign import putMVarImpl """
+    function putMVarImpl(a, m) {
+      return function() {
+        while (m.filled) {}
+        m.filled = true;
+        m.val = a;
 
-  foreign import takeMVar
-    """
-      function takeMVar(mVar) {
-        return function() {
-          var ready = false;
-          mVar.enqueueTake(function() {
-            ready = true;
-          })
-          while (!ready) {}
-          return mVar.value;
-        }
+        return {};
       }
-    """ :: forall a eff. MVar a -> Eff (mVar :: M | eff) a
+    }
+  """ :: forall a eff. Fn2 a (MVar a) (Eff (mvar :: MVarEff | eff) Unit)
 
-  main :: Eff (mVar :: M, trace :: Trace) Unit
-  main = do
-    foo <- newEmptyMVar
-    putMVar foo 3
-    x <- readMVar foo
-    print x
-    y <- takeMVar foo
-    print y
+  foreign import takeMVarImpl """
+    function takeMVarImpl(m) {
+      return function() {
+        while (!m.filled) {}
+        m.filled = false;
+
+        return m.val;
+      }
+    }
+  """ :: forall a eff. MVar a -> Eff (mvar :: MVarEff | eff) a
+
+  modifyMVar :: forall a eff. (a -> a) -> MVar a -> Eff (mvar :: MVarEff | eff) (MVar a)
+  modifyMVar f m = do
+    a <- takeMVar m
+    putMVar (f a) m
+    pure m
+
+  newEmptyMVar :: forall a eff. Eff (mvar :: MVarEff | eff) (MVar a)
+  newEmptyMVar = newEmptyMVarImpl
+
+  newMVar :: forall a eff. a -> Eff (mvar :: MVarEff | eff) (MVar a)
+  newMVar a = do
+    m <- newEmptyMVar
+    putMVar a m
+    pure m
+
+  putMVar :: forall a eff. a -> MVar a -> Eff (mvar :: MVarEff | eff) Unit
+  putMVar a m = runFn2 putMVarImpl a m
+
+  readMVar :: forall a eff. MVar a -> Eff (mvar :: MVarEff | eff) a
+  readMVar m = do
+    a <- takeMVar m
+    putMVar a m
+    pure a
+
+  swapMVar :: forall a eff. MVar a -> a -> Eff (mvar :: MVarEff | eff) a
+  swapMVar m a = do
+    a' <- takeMVar m
+    putMVar a m
+    pure a'
+
+  takeMVar :: forall a eff. MVar a -> Eff (mvar :: MVarEff | eff) a
+  takeMVar = takeMVarImpl

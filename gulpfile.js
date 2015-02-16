@@ -34,12 +34,11 @@ var compile = function(compiler) {
         .pipe(gulp.dest(paths.dest));
 };
 
-gulp.task('example', function() {
-    var cond = function(name) { return /purs$/.test(name) };
-    return gulp.src([paths.src, paths.jsSrc].concat(paths.bowerSrc))
-        .pipe(gulpif(cond, purescript.psc(options.compiler)))
-        .pipe(concat('out.js'))
-        .pipe(gulp.dest('js'));
+gulp.task('example', ['browser'], function() {
+    return gulp.src([paths.jsSrc, 'psc.js'])
+        .pipe(concat('psc.js'))
+        .pipe(gulp.dest('.'))
+        .pipe(run('node psc.js'));
 });
 
 gulp.task('make', function() {
