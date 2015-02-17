@@ -4,6 +4,7 @@
   "description": "PureScript concurrency primitives.",
   "license": "MIT",
   "dependencies": {
-    "purescript-transformers": "~0.4.0"
+    "purescript-transformers": "~0.4.0",
+    "purescript-refs": "~0.1.2"
   }
 }

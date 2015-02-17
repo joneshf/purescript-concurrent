@@ -4,146 +4,184 @@
 
 ### Types
 
-#### `Concurrency`
+#### `Concurrent`
 
-    type Concurrency r m a = ContT r (Step m) a
+    type Concurrent a = forall b. ContT b Step a
+
+#### `IVarContents`
+
+    data IVarContents a
+      = Blocked [a -> Step a]
+      | Full a
 
 #### `Step`
 
-    data Step m a
-      = Step (m a)
-      | Atom (m (Step m a))
-      | Fork (Step m a) (Step m a)
+    data Step a
+      = Step a
+      | Fork (Step a) (Step a)
       | Stop 
 
 
 ### Type Class Instances
 
+#### `altEff`
+
+    instance altEff :: Alt (Eff e)
+
+#### `alternativeEff`
+
+    instance alternativeEff :: Alternative (Eff e)
+
 #### `applicativeStep`
 
-    instance applicativeStep :: (Applicative m) => Applicative (Step m)
+    instance applicativeStep :: Applicative Step
 
 #### `applyStep`
 
-    instance applyStep :: (Apply m) => Apply (Step m)
+    instance applyStep :: Apply Step
 
 #### `bindStep`
 
-    instance bindStep :: (Apply m) => Bind (Step m)
+    instance bindStep :: Bind Step
 
 #### `functorStep`
 
-    instance functorStep :: (Functor m) => Functor (Step m)
+    instance functorStep :: Functor Step
+
+#### `monadPlusEff`
+
+    instance monadPlusEff :: MonadPlus (Eff e)
 
 #### `monadStep`
 
-    instance monadStep :: (Monad m) => Monad (Step m)
+    instance monadStep :: Monad Step
 
-#### `monadTransStep`
+#### `plusEff`
 
-    instance monadTransStep :: MonadTrans Step
+    instance plusEff :: Plus (Eff e)
 
 
 ### Values
-
-#### `atom`
-
-    atom :: forall r a m. (Functor m) => m a -> Concurrency r m a
 
 #### `fork`
 
-    fork :: forall r a m. Concurrency r m a -> Concurrency r m Unit
+    fork :: forall a. a -> a -> Concurrent a
 
-#### `forkEff`
+#### `pureRef`
 
-    forkEff :: Eff _ Unit -> Concurrency Unit (Eff _) Unit
+    pureRef :: forall r s. Eff (ref :: Ref | r) s -> s
+
+#### `pythag`
+
+    pythag :: Number -> Number -> Number
+
+#### `reschedule`
+
+    reschedule :: forall b a m. (MonadPlus m) => [Step a] -> m Unit
 
 #### `roundRobin`
 
-    roundRobin :: forall m r. (Monad m) => [Step m r] -> m Unit
+    roundRobin :: forall m a. (Monad m) => [Step a] -> m Unit
 
-#### `run`
+#### `runConcurrent`
 
-    run :: forall r a m. (Monad m) => Concurrency r m a -> m Unit
+    runConcurrent :: forall b a m. Concurrent a -> Eff _ a
 
-#### `setTimeout_`
+#### `schedule`
 
-    setTimeout_ :: forall a eff. Fn2 (Eff eff a) Number (Eff eff a)
+    schedule :: forall b a m. (MonadPlus m) => [Step a] -> Step a -> m Unit
 
 #### `step`
 
-    step :: forall r a m. Concurrency r m a -> Step m r
+    step :: forall a. a -> Concurrent a
 
 #### `stop`
 
-    stop :: forall r a m. Concurrency r m a
+    stop :: forall a. Concurrent a
 
 #### `undefined`
 
     undefined :: forall a. a
 
 
-## Module Concurrent.MVar
+## Module Concurrent.Temp
 
 ### Types
 
-#### `MVar`
+#### `Concurrent`
 
-    data MVar :: * -> *
+    type Concurrent a = ContT Step Identity a
 
-#### `MVarEff`
+#### `GetExists`
 
-    data MVarEff :: !
+    data GetExists a
+      = GetExists (IVar a) (a -> Step)
+
+#### `IVar`
+
+    newtype IVar a
+      = IVar (RefVal (IVarContents a))
+
+#### `IVarContents`
+
+    data IVarContents a
+      = Blocked [a -> Step]
+      | Empty 
+      | Full a
+
+#### `NewExists`
+
+    data NewExists a
+      = NewExists (IVar a -> Step)
+
+#### `PutExists`
+
+    data PutExists a
+      = PutExists (IVar a) a Step
+
+#### `Step`
+
+    data Step
+      = Get (Exists GetExists)
+      | Put (Exists PutExists)
+      | New (Exists NewExists)
+      | Fork Step Step
+      | Stop 
 
 
 ### Values
 
-#### `modifyMVar`
+#### `fork`
 
-    modifyMVar :: forall a eff. (a -> a) -> MVar a -> Eff (mvar :: MVarEff | eff) (MVar a)
+    fork :: Concurrent Unit -> Concurrent Unit
 
-#### `newEmptyMVar`
+#### `get`
 
-    newEmptyMVar :: forall a eff. Eff (mvar :: MVarEff | eff) (MVar a)
+    get :: forall a. IVar a -> Concurrent a
 
-#### `newEmptyMVarImpl`
+#### `new`
 
-     data MAction m a = Put a m
-                      | Take m a
+    new :: forall a. Concurrent (IVar a)
 
-    newEmptyMVarImpl :: forall a eff. Eff (mvar :: MVarEff | eff) (MVar a)
+#### `put`
 
-#### `newMVar`
-
-    newMVar :: forall a eff. a -> Eff (mvar :: MVarEff | eff) (MVar a)
-
-#### `putMVar`
-
-    putMVar :: forall a eff. a -> MVar a -> Eff (mvar :: MVarEff | eff) Unit
-
-#### `putMVarImpl`
-
-    putMVarImpl :: forall a eff. Fn2 a (MVar a) (Eff (mvar :: MVarEff | eff) Unit)
-
-#### `readMVar`
-
-    readMVar :: forall a eff. MVar a -> Eff (mvar :: MVarEff | eff) a
-
-#### `swapMVar`
-
-    swapMVar :: forall a eff. MVar a -> a -> Eff (mvar :: MVarEff | eff) a
-
-#### `takeMVar`
-
-    takeMVar :: forall a eff. MVar a -> Eff (mvar :: MVarEff | eff) a
-
-#### `takeMVarImpl`
-
-    takeMVarImpl :: forall a eff. MVar a -> Eff (mvar :: MVarEff | eff) a
+    put :: forall a. IVar a -> a -> Concurrent Unit
 
 #### `undefined`
 
     undefined :: forall a. a
+
+
+## Module Concurrent.Par
+
+### Type Classes
+
+#### `ParFuture`
+
+    class (Monad m) <= ParFuture future m where
+      spawn :: forall a. m a -> m (future a)
+      spawnP :: forall a. a -> m (future a)
+      get :: forall a. future a -> m a
 
 
 
