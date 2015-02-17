@@ -1,19 +1,17 @@
+{- |
+    Concurrent implementation based heavily on the `monad-par` paper by
+    Marlow, Newton and Peyton-Jones
+-}
+
 module Concurrent where
 
-  import Control.Apply
-  import Control.Monad
   import Control.Monad.Cont.Trans
   import Control.Monad.Eff
   import Control.Monad.Eff.Ref
   import Control.Monad.Eff.Unsafe
 
-  import Data.Array
   import Data.Exists
   import Data.Identity
-  import Data.Function (on)
-  import Data.Traversable
-
-  import Debug.Trace
 
   foreign import undefined :: forall a. a
 
@@ -101,30 +99,5 @@ module Concurrent where
                                           (const $ Identity Stop)
     r <- readRef ref
     case r of
-      Full a -> return a
+      Full a -> pure a
       _      -> undefined)
-
-  -- We can specify explicitly the way things should compute.
-  pythag :: Number -> Number -> Number
-  pythag a b = runConcurrent nonPreemptive do
-    a2i   <- spawnP $ a * a
-    b2i   <- spawnP $ b * b
-    a2    <- get a2i
-    b2    <- get b2i
-    a2b2i <- spawnP $ a2 + b2
-    a2b2  <- get a2b2i
-    pure $ Math.sqrt a2b2
-
-  -- Or just let things resolve themselves.
-  diamond :: Number
-  diamond = runConcurrent nonPreemptive do
-    [a, b, c, d] <- replicateM 4 new
-    fork $ get a >>= \x -> put b (x + 1)
-    fork $ get a >>= \x -> put c (x + 2)
-    fork $ get b >>= \x -> get c >>= \y -> put d (x + y)
-    fork $ put a 3
-    get d
-
-  main = do
-    print $ pythag 3 4
-    print diamond

@@ -56,12 +56,6 @@
 
 ### Values
 
-#### `diamond`
-
-     Or just let things resolve themselves.
-
-    diamond :: Number
-
 #### `fork`
 
     fork :: Concurrent Unit -> Concurrent Unit
@@ -81,12 +75,6 @@
 #### `put`
 
     put :: forall a. IVar a -> a -> Concurrent Unit
-
-#### `pythag`
-
-     We can specify explicitly the way things should compute.
-
-    pythag :: Number -> Number -> Number
 
 #### `reschedule`
 

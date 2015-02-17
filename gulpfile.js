@@ -1,10 +1,15 @@
 'use strict'
 
-var gulp       = require('gulp')
-  , concat     = require('gulp-concat')
-  , gulpif     = require('gulp-if')
-  , purescript = require('gulp-purescript')
-  , run        = require('gulp-run')
+var gulp        = require('gulp')
+  , bump        = require('gulp-bump')
+  , concat      = require('gulp-concat')
+  , filter      = require('gulp-filter')
+  , git         = require('gulp-git')
+  , gulpif      = require('gulp-if')
+  , purescript  = require('gulp-purescript')
+  , run         = require('gulp-run')
+  , runSequence = require('run-sequence')
+  , tagVersion  = require('gulp-tag-version')
   ;
 
 var paths = {
@@ -15,34 +20,70 @@ var paths = {
     ],
     dest: '',
     docsDest: 'README.md',
-    jsSrc: 'src/**/*.js'
+    jsSrc: 'src/**/*.js',
+    manifests: [
+      'bower.json',
+      'package.json'
+    ]
 };
 
 var options = {
-    compiler: {main: 'Concurrent.MVar'},
+    compiler: {},
+    examples: {main: 'Examples.Concurrent'},
     pscDocs: {}
 };
 
-var compile = function(compiler) {
-    var psc = compiler(options.compiler);
+var compile = function(compiler, src, options) {
+    var psc = compiler(options);
     psc.on('error', function(e) {
         console.error(e.message);
         psc.end();
     });
-    return gulp.src([paths.src].concat(paths.bowerSrc))
+    return gulp.src([paths.src].concat(src).concat(paths.bowerSrc))
         .pipe(psc)
         .pipe(gulp.dest(paths.dest));
 };
 
-gulp.task('example', ['browser'], function() {
-    return gulp.src([paths.jsSrc, 'psc.js'])
-        .pipe(concat('psc.js'))
-        .pipe(gulp.dest('.'))
-        .pipe(run('node psc.js'));
+function bumpType(type) {
+    return gulp.src(paths.manifests)
+        .pipe(bump({type: type}))
+        .pipe(gulp.dest('./'));
+}
+
+gulp.task('tag', function() {
+    return gulp.src(paths.manifests)
+        .pipe(git.commit('Update versions.'))
+        .pipe(filter('bower.json'))
+        .pipe(tagVersion());
+});
+
+gulp.task('bump-major', function() {
+    return bumpType('major')
+});
+gulp.task('bump-minor', function() {
+    return bumpType('minor')
+});
+gulp.task('bump-patch', function() {
+    return bumpType('patch')
+});
+
+gulp.task('bump-tag-major', function() {
+    return runSequence('bump-major', 'tag');
+});
+gulp.task('bump-tag-minor', function() {
+    return runSequence('bump-minor', 'tag');
+});
+gulp.task('bump-tag-patch', function() {
+    return runSequence('bump-patch', 'tag');
+});
+
+gulp.task('example', function() {
+    return compile(purescript.psc, ['examples/**/*.purs'], options.examples)
+        .pipe(run('node'));
 });
 
 gulp.task('make', function() {
-    return compile(purescript.pscMake);
+    return compile(purescript.pscMake, [], options.compiler);
 });
 
 gulp.task('dotPsci', function() {
@@ -51,7 +92,7 @@ gulp.task('dotPsci', function() {
 });
 
 gulp.task('browser', function() {
-    return compile(purescript.psc);
+    return compile(purescript.psc, [], options.compiler);
 });
 
 gulp.task('docs', function() {

@@ -1,0 +1,41 @@
+module Examples.Concurrent where
+
+  import Concurrent (fork, get, new, put, spawnP, nonPreemptive, runConcurrent)
+
+  import Control.Monad (replicateM)
+
+  import Debug.Trace
+
+  import Math
+
+  -- We can specify explicitly the way things should compute.
+  pythag :: Number -> Number -> Number
+  pythag a b = runConcurrent nonPreemptive do
+    a2i   <- spawnP $ a * a
+    b2i   <- spawnP $ b * b
+    a2    <- get a2i
+    b2    <- get b2i
+    a2b2i <- spawnP $ a2 + b2
+    a2b2  <- get a2b2i
+    pure $ sqrt a2b2
+
+  -- Or just let things resolve themselves.
+  -- This example forms a diamond pattern.
+  --   a
+  --  / \
+  -- b   c
+  --  \ /
+  --   d
+  -- But we don't have to care about how we describe the computation.
+  diamond :: Number
+  diamond = runConcurrent nonPreemptive do
+    [a, b, c, d] <- replicateM 4 new
+    fork $ get a >>= \x -> put b (x + 1)
+    fork $ get a >>= \x -> put c (x + 2)
+    fork $ get b >>= \x -> get c >>= \y -> put d (x + y)
+    fork $ put a 3
+    get d
+
+  main = do
+    print $ pythag 3 4
+    print diamond
