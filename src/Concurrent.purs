@@ -1,115 +1,130 @@
 module Concurrent where
 
-  import Control.Alt
-  import Control.Alternative
   import Control.Apply
+  import Control.Monad
   import Control.Monad.Cont.Trans
   import Control.Monad.Eff
   import Control.Monad.Eff.Ref
-  import Control.Monad.ST
-  import Control.Plus
-  import Control.MonadPlus
+  import Control.Monad.Eff.Unsafe
 
   import Data.Array
+  import Data.Exists
+  import Data.Identity
   import Data.Function (on)
+  import Data.Traversable
 
   import Debug.Trace
 
-  data Step a = Step a
-              | Fork (Step a) (Step a)
-              | Stop
-
-  type Concurrent a = forall b. ContT b Step a
-
-  stop :: forall a. Concurrent a
-  stop = ContT \_ -> Stop
-
-  fork :: forall a. a -> a -> Concurrent a
-  fork x y = ContT \k -> Fork (k x) (k y)
-
-  step :: forall a. a -> Concurrent a
-  step = pure
-
-  instance functorStep :: Functor Step where
-    (<$>) _ Stop        = Stop
-    (<$>) f (Fork c c') = Fork (f <$> c) (f <$> c')
-    (<$>) f (Step a)    = Step (f a)
-
-  instance applyStep :: Apply Step where
-    (<*>) Stop       _          = Stop
-    (<*>) _          Stop       = Stop
-    (<*>) (Fork f g) c          = Fork (f <*> c) (g <*> c)
-    (<*>) f          (Fork x y) = Fork (f <*> x) (f <*> y)
-    (<*>) (Step f)   c          = f <$> c
-    (<*>) f          (Step x)   = f <#> ($ x)
-
-  instance bindStep :: Bind Step where
-    (>>=) (Step x)    f = f x
-    (>>=) (Fork s s') f = Fork (s >>= f) (s' >>= f)
-    (>>=) Stop        _ = Stop
-
-  instance applicativeStep :: Applicative Step where
-    pure = Step
-
-  instance monadStep :: Monad Step
-
-  roundRobin :: forall m a. (Monad m) => [Step a] -> m Unit
-  roundRobin []     = pure unit
-  roundRobin (s:ss) = case s of
-    Step a      -> pure a *> roundRobin ss
-    Fork s' s'' -> roundRobin (ss ++ [s', s''])
-    Stop        -> roundRobin ss
-
-  reschedule :: forall b a m. (MonadPlus m) => [Step a] -> m Unit
-  reschedule []     = pure unit
-  reschedule (s:ss) = schedule ss s
-
-  schedule :: forall b a m. (MonadPlus m) => [Step a] -> Step a -> m Unit
-  schedule ss (Step a)            = pure a *> reschedule ss
-  schedule ss (Fork child parent) = schedule (child:ss) parent
-  schedule ss Stop                = reschedule ss
-
-  data IVarContents a = Blocked [a -> Step a]
-                      | Full a
-
   foreign import undefined :: forall a. a
 
-  foreign import pureRef """
-    function pureRef(eff) {
-      console.log(eff);
-      return eff;
-    }
-  """ :: forall r s. Eff (ref :: Ref | r) s -> s
+  type Concurrent a = ContT Step Identity a
 
-  instance altEff :: Alt (Eff e) where
-    (<|>) e e' = e *> e'
+  data IVarContents a = Blocked [a -> Step]
+                      | Empty
+                      | Full a
 
-  instance plusEff :: Plus (Eff e) where
-    empty = undefined
+  newtype IVar a = IVar (RefVal (IVarContents a))
 
-  instance alternativeEff :: Alternative (Eff e)
+  data Pair a b = Pair a b
 
-  instance monadPlusEff :: MonadPlus (Eff e)
+  data Step = Get (Exists GetExists)
+            | Put (Exists PutExists)
+            | New (Exists NewExists)
+            | Fork Step Step
+            | Stop
 
-  runConcurrent :: forall b a m. Concurrent a -> Eff _ a
-  runConcurrent c =  (do
-    ref <- newSTRef (Blocked [])
-    schedule [] (runContT (c >>= put ref) (\_ -> Stop))
-    a <- readSTRef ref
-    case a of
-      Full a' -> pure a'
-      Blocked _ -> undefined)
-    where
-      -- put :: forall a r. RefVal a -> a -> Concurrent Unit
-      put ref val = ContT \k ->
-        Step ((writeSTRef ref $ Full val))
+  data GetExists a = GetExists (IVar a) (a -> Step)
+  data PutExists a = PutExists (IVar a) a Step
+  data NewExists a = NewExists (IVarContents a) (IVar a -> Step)
 
+  type Scheduler = forall eff. [Step] -> Step -> Eff (ref :: Ref | eff) Unit
+
+  runExists' :: forall r f. Exists f -> (forall a. f a -> r) -> r
+  runExists' ex f = runExists f ex
+
+  fork :: Concurrent Unit -> Concurrent Unit
+  fork c = ContT \k ->
+    Identity $ Fork (runIdentity $ runContT c (\_ -> Identity Stop))
+                    (runIdentity $ k unit)
+
+  get :: forall a. IVar a -> Concurrent a
+  get i = ContT \k ->
+    Identity $ Get $ mkExists $ GetExists i (runIdentity <<< k)
+
+  put :: forall a. IVar a -> a -> Concurrent Unit
+  put i a = ContT \k ->
+    Identity $ Put $ mkExists $ PutExists i a (runIdentity $ k unit)
+
+  new :: forall a. Concurrent (IVar a)
+  new = ContT \k ->
+    Identity $ New $ mkExists $ NewExists Empty (runIdentity <<< k)
+
+  stop :: forall a. Concurrent a
+  stop = ContT \k -> Identity Stop
+
+  spawnP :: forall a. a -> Concurrent (IVar a)
+  spawnP a = do
+    i <- new
+    put i a
+    pure i
+
+  reschedule :: forall eff. [Step] -> Eff (ref :: Ref | eff) Unit
+  reschedule []     = pure unit
+  reschedule (s:ss) = nonPreemptive ss s
+
+  nonPreemptive :: Scheduler
+  nonPreemptive ss (New ex)            = runExists' ex \(NewExists i f) -> do
+    ref <- newRef i
+    nonPreemptive ss (f (IVar ref))
+  nonPreemptive ss s@(Get ex)          = runExists' ex \(GetExists (IVar ref) f) -> do
+    i <- readRef ref
+    case i of
+      Blocked fs -> do
+        writeRef ref $ Blocked (f:fs)
+        reschedule ss
+      Empty  -> reschedule (ss ++ [s])
+      Full a -> nonPreemptive ss (f a)
+  nonPreemptive ss (Put ex)            = runExists' ex \(PutExists (IVar ref) a s) -> do
+    fs <- modifyRef' ref \ic -> case ic of
+      Blocked fs -> {newState: Full a, retVal: fs}
+      Empty      -> {newState: Full a, retVal: []}
+      Full    a  -> undefined
+    let ss' = ($ a) <$> fs
+    nonPreemptive (ss' ++ ss) s
+  nonPreemptive ss (Fork child parent) = nonPreemptive (child:ss) parent
+  nonPreemptive ss Stop                = reschedule ss
+
+  runConcurrent :: forall a. Scheduler -> Concurrent a -> a
+  runConcurrent scheduler c = runPure (unsafeInterleaveEff do
+    ref <- newRef $ Blocked []
+    scheduler [] $ runIdentity $ runContT (c >>= put (IVar ref))
+                                          (const $ Identity Stop)
+    r <- readRef ref
+    case r of
+      Full a -> return a
+      _      -> undefined)
+
+  -- We can specify explicitly the way things should compute.
   pythag :: Number -> Number -> Number
-  pythag x y = pureST (runConcurrent do
-    xSq <- pure $ x * x
-    ySq <- pure $ y * y
-    sum <- pure $ xSq + ySq
-    pure $ Math.sqrt sum)
+  pythag a b = runConcurrent nonPreemptive do
+    a2i   <- spawnP $ a * a
+    b2i   <- spawnP $ b * b
+    a2    <- get a2i
+    b2    <- get b2i
+    a2b2i <- spawnP $ a2 + b2
+    a2b2  <- get a2b2i
+    pure $ Math.sqrt a2b2
+
+  -- Or just let things resolve themselves.
+  diamond :: Number
+  diamond = runConcurrent nonPreemptive do
+    [a, b, c, d] <- replicateM 4 new
+    fork $ get a >>= \x -> put b (x + 1)
+    fork $ get a >>= \x -> put c (x + 2)
+    fork $ get b >>= \x -> get c >>= \y -> put d (x + y)
+    fork $ put a 3
+    get d
 
   main = do
     print $ pythag 3 4
+    print diamond

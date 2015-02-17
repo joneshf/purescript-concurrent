@@ -6,94 +6,103 @@
 
 #### `Concurrent`
 
-    type Concurrent a = forall b. ContT b Step a
+    type Concurrent a = ContT Step Identity a
+
+#### `GetExists`
+
+    data GetExists a
+      = GetExists (IVar a) (a -> Step)
+
+#### `IVar`
+
+    newtype IVar a
+      = IVar (RefVal (IVarContents a))
 
 #### `IVarContents`
 
     data IVarContents a
-      = Blocked [a -> Step a]
+      = Blocked [a -> Step]
+      | Empty 
       | Full a
+
+#### `NewExists`
+
+    data NewExists a
+      = NewExists (IVarContents a) (IVar a -> Step)
+
+#### `Pair`
+
+    data Pair a b
+      = Pair a b
+
+#### `PutExists`
+
+    data PutExists a
+      = PutExists (IVar a) a Step
+
+#### `Scheduler`
+
+    type Scheduler = forall eff. [Step] -> Step -> Eff (ref :: Ref | eff) Unit
 
 #### `Step`
 
-    data Step a
-      = Step a
-      | Fork (Step a) (Step a)
+    data Step
+      = Get (Exists GetExists)
+      | Put (Exists PutExists)
+      | New (Exists NewExists)
+      | Fork Step Step
       | Stop 
-
-
-### Type Class Instances
-
-#### `altEff`
-
-    instance altEff :: Alt (Eff e)
-
-#### `alternativeEff`
-
-    instance alternativeEff :: Alternative (Eff e)
-
-#### `applicativeStep`
-
-    instance applicativeStep :: Applicative Step
-
-#### `applyStep`
-
-    instance applyStep :: Apply Step
-
-#### `bindStep`
-
-    instance bindStep :: Bind Step
-
-#### `functorStep`
-
-    instance functorStep :: Functor Step
-
-#### `monadPlusEff`
-
-    instance monadPlusEff :: MonadPlus (Eff e)
-
-#### `monadStep`
-
-    instance monadStep :: Monad Step
-
-#### `plusEff`
-
-    instance plusEff :: Plus (Eff e)
 
 
 ### Values
 
+#### `diamond`
+
+     Or just let things resolve themselves.
+
+    diamond :: Number
+
 #### `fork`
 
-    fork :: forall a. a -> a -> Concurrent a
+    fork :: Concurrent Unit -> Concurrent Unit
 
-#### `pureRef`
+#### `get`
 
-    pureRef :: forall r s. Eff (ref :: Ref | r) s -> s
+    get :: forall a. IVar a -> Concurrent a
+
+#### `new`
+
+    new :: forall a. Concurrent (IVar a)
+
+#### `nonPreemptive`
+
+    nonPreemptive :: Scheduler
+
+#### `put`
+
+    put :: forall a. IVar a -> a -> Concurrent Unit
 
 #### `pythag`
+
+     We can specify explicitly the way things should compute.
 
     pythag :: Number -> Number -> Number
 
 #### `reschedule`
 
-    reschedule :: forall b a m. (MonadPlus m) => [Step a] -> m Unit
-
-#### `roundRobin`
-
-    roundRobin :: forall m a. (Monad m) => [Step a] -> m Unit
+    reschedule :: forall eff. [Step] -> Eff (ref :: Ref | eff) Unit
 
 #### `runConcurrent`
 
-    runConcurrent :: forall b a m. Concurrent a -> Eff _ a
+    runConcurrent :: forall a. Scheduler -> Concurrent a -> a
 
-#### `schedule`
+#### `runExists'`
 
-    schedule :: forall b a m. (MonadPlus m) => [Step a] -> Step a -> m Unit
+    runExists' :: forall r f. Exists f -> (forall a. f a -> r) -> r
 
-#### `step`
+#### `spawnP`
 
-    step :: forall a. a -> Concurrent a
+    spawnP :: forall a. a -> Concurrent (IVar a)
 
 #### `stop`
 
