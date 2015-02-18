@@ -8,6 +8,10 @@
 
     type Concurrent a = ContT Step Identity a
 
+#### `ExistsEff`
+
+    data ExistsEff :: (# ! -> * -> *) -> *
+
 #### `GetExists`
 
     data GetExists a
@@ -30,11 +34,6 @@
     data NewExists a
       = NewExists (IVarContents a) (IVar a -> Step)
 
-#### `Pair`
-
-    data Pair a b
-      = Pair a b
-
 #### `PutExists`
 
     data PutExists a
@@ -44,12 +43,18 @@
 
     type Scheduler = forall eff. [Step] -> Step -> Eff (ref :: Ref | eff) Unit
 
+#### `SpawnEffExists`
+
+    data SpawnEffExists eff a
+      = SpawnEffExists (Eff eff a) (a -> Step)
+
 #### `Step`
 
     data Step
       = Get (Exists GetExists)
-      | Put (Exists PutExists)
       | New (Exists NewExists)
+      | Put (Exists PutExists)
+      | SpawnEff (ExistsEff SpawnEffExists)
       | Fork Step Step
       | Stop 
 
@@ -64,41 +69,45 @@
 
     get :: forall a. IVar a -> Concurrent a
 
+#### `mkExistsEff`
+
+    mkExistsEff :: forall f eff a. f eff a -> ExistsEff f
+
 #### `new`
 
     new :: forall a. Concurrent (IVar a)
-
-#### `nonPreemptive`
-
-    nonPreemptive :: Scheduler
 
 #### `put`
 
     put :: forall a. IVar a -> a -> Concurrent Unit
 
-#### `reschedule`
-
-    reschedule :: forall eff. [Step] -> Eff (ref :: Ref | eff) Unit
-
 #### `runConcurrent`
 
-    runConcurrent :: forall a. Scheduler -> Concurrent a -> a
+     TODO: It'd be nice if this didn't return a `Maybe a`,
+     Think about other representations.
 
-#### `runExists'`
+    runConcurrent :: forall a. Scheduler -> Concurrent a -> Maybe a
 
-    runExists' :: forall r f. Exists f -> (forall a. f a -> r) -> r
+#### `spawnEff`
 
-#### `spawnP`
+    spawnEff :: forall a eff. Eff eff a -> Concurrent a
 
-    spawnP :: forall a. a -> Concurrent (IVar a)
+#### `spawnPure`
+
+    spawnPure :: forall a. a -> Concurrent (IVar a)
 
 #### `stop`
 
     stop :: forall a. Concurrent a
 
-#### `undefined`
 
-    undefined :: forall a. a
+## Module Concurrent.Scheduler
+
+### Values
+
+#### `nonPreemptive`
+
+    nonPreemptive :: Scheduler
 
 
 

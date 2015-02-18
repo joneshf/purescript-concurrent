@@ -12,10 +12,7 @@ module Concurrent where
 
   import Data.Exists
   import Data.Identity
-
-  foreign import undefined :: forall a. a
-
-  type Concurrent a = ContT Step Identity a
+  import Data.Maybe
 
   data IVarContents a = Blocked [a -> Step]
                       | Empty
@@ -23,22 +20,28 @@ module Concurrent where
 
   newtype IVar a = IVar (RefVal (IVarContents a))
 
-  data Pair a b = Pair a b
+  data GetExists a = GetExists (IVar a) (a -> Step)
+  data NewExists a = NewExists (IVarContents a) (IVar a -> Step)
+  data PutExists a = PutExists (IVar a) a Step
+  data SpawnEffExists eff a = SpawnEffExists (Eff eff a) (a -> Step)
 
   data Step = Get (Exists GetExists)
-            | Put (Exists PutExists)
             | New (Exists NewExists)
+            | Put (Exists PutExists)
+            | SpawnEff (ExistsEff SpawnEffExists)
             | Fork Step Step
             | Stop
 
-  data GetExists a = GetExists (IVar a) (a -> Step)
-  data PutExists a = PutExists (IVar a) a Step
-  data NewExists a = NewExists (IVarContents a) (IVar a -> Step)
+  foreign import data ExistsEff :: (# ! -> * -> *) -> *
 
+  foreign import mkExistsEff """
+    function mkExistsEff(f) {
+      return f;
+    }
+  """ :: forall f eff a. f eff a -> ExistsEff f
+
+  type Concurrent a = ContT Step Identity a
   type Scheduler = forall eff. [Step] -> Step -> Eff (ref :: Ref | eff) Unit
-
-  runExists' :: forall r f. Exists f -> (forall a. f a -> r) -> r
-  runExists' ex f = runExists f ex
 
   fork :: Concurrent Unit -> Concurrent Unit
   fork c = ContT \k ->
@@ -60,44 +63,23 @@ module Concurrent where
   stop :: forall a. Concurrent a
   stop = ContT \k -> Identity Stop
 
-  spawnP :: forall a. a -> Concurrent (IVar a)
-  spawnP a = do
+  spawnPure :: forall a. a -> Concurrent (IVar a)
+  spawnPure a = do
     i <- new
     put i a
     pure i
 
-  reschedule :: forall eff. [Step] -> Eff (ref :: Ref | eff) Unit
-  reschedule []     = pure unit
-  reschedule (s:ss) = nonPreemptive ss s
+  spawnEff :: forall a eff. Eff eff a -> Concurrent (a)
+  spawnEff eff = ContT \k ->
+    Identity $ SpawnEff $ mkExistsEff $ SpawnEffExists eff (const Stop)
 
-  nonPreemptive :: Scheduler
-  nonPreemptive ss (New ex)            = runExists' ex \(NewExists i f) -> do
-    ref <- newRef i
-    nonPreemptive ss (f (IVar ref))
-  nonPreemptive ss s@(Get ex)          = runExists' ex \(GetExists (IVar ref) f) -> do
-    i <- readRef ref
-    case i of
-      Blocked fs -> do
-        writeRef ref $ Blocked (f:fs)
-        reschedule ss
-      Empty  -> reschedule (ss ++ [s])
-      Full a -> nonPreemptive ss (f a)
-  nonPreemptive ss (Put ex)            = runExists' ex \(PutExists (IVar ref) a s) -> do
-    fs <- modifyRef' ref \ic -> case ic of
-      Blocked fs -> {newState: Full a, retVal: fs}
-      Empty      -> {newState: Full a, retVal: []}
-      Full    a  -> undefined
-    let ss' = ($ a) <$> fs
-    nonPreemptive (ss' ++ ss) s
-  nonPreemptive ss (Fork child parent) = nonPreemptive (child:ss) parent
-  nonPreemptive ss Stop                = reschedule ss
-
-  runConcurrent :: forall a. Scheduler -> Concurrent a -> a
+  -- TODO: It'd be nice if this didn't return a `Maybe a`,
+  -- Think about other representations.
+  runConcurrent :: forall a. Scheduler -> Concurrent a -> Maybe a
   runConcurrent scheduler c = runPure (unsafeInterleaveEff do
     ref <- newRef $ Blocked []
-    scheduler [] $ runIdentity $ runContT (c >>= put (IVar ref))
-                                          (const $ Identity Stop)
+    scheduler [] $ runIdentity $ runContT (c >>= put (IVar ref)) \_ -> pure Stop
     r <- readRef ref
     case r of
-      Full a -> pure a
-      _      -> undefined)
+      Full a -> pure $ Just a
+      _      -> pure $ Nothing)
